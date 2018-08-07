@@ -18,9 +18,11 @@ class Trinity(sc2.BotAI):
   def __init__(self):
   
   async def on_step(self, iteration):
-        if iteration == 0:
-            for worker in self.workers:
-                await self.do(worker.attack(self.enemy_start_locations[0]))
+    if iteration == 0:
+      await self.onStart()
+            
+  async def onStart(self):
+    await self.chat_send("(glhf)")
                 
 run_game(maps.get("MechDepotLE"), [
      #Human(Race.Zerg),
