@@ -23,20 +23,29 @@ class Trinity(sc2.BotAI):
     async def on_step(self, iteration):
         if iteration == 0:
             await self.onStart()
+        
+        ###EVERY RACE FUNCTIONS###
         # self.remember_enemy_units()
         # self.remember_friendly_units()
         await self.distribute_workers()
-
+        
+        ###TERRAN FUNCTIONS###
         if self.myRace == "Terran":
             print(self.myRace)
+            
+        ###ZERG FUNCTIONS###
         elif self.myRace == "Zerg":
            print(self.myRace)
+        
+        ###PROTOSS FUNCTIONS###
         elif self.myRace == "Protoss":
             await self.buildPylons()
             await self.buildProbes()
-
+            
+    ###FUNCTIONS FOR EVERY RACE###
     async def onStart(self):
         await self.chat_send("(glhf)")
+        #Figures out what race the bot is
         if self.townhalls == self.units(COMMANDCENTER):
             self.myRace = "Terran"
         elif self.townhalls == self.units(HATCHERY):
@@ -44,8 +53,9 @@ class Trinity(sc2.BotAI):
         elif self.townhalls == self.units(NEXUS):
             self.myRace = "Protoss"
 
+    ###PROTOSS FUNCTIONS###
     async def buildProbes(self):
-        if (self.units(NEXUS).amount * 22) > self.units(PROBE).amount:
+        if (self.units(NEXUS).amount * 22) > self.units(PROBE).amount: 
             if self.units(PROBE).amount < 70 and self.can_afford(PROBE):
                 for nexus in self.units(NEXUS).noqueue:
                     await self.do(nexus.train(PROBE))
@@ -56,8 +66,11 @@ class Trinity(sc2.BotAI):
             if self.supply_left <= 8 and self.already_pending(PYLON) < 2 and self.supply_cap < 200:
                 if self.can_afford(PYLON):
                     await self.build(PYLON, near=nexus.position.towards(self.game_info.map_center, 8))
-
-
+    ###TERRAN FUNCTIONS###
+    
+    ###ZERG FUNCTIONS###
+    
+    ###USE FUNCTIONS###
     def remember_enemy_units(self):
         # Every 60 seconds, clear all remembered units (to clear out killed units)
         # if round(self.get_game_time() % 60) == 0:
