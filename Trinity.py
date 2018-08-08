@@ -24,16 +24,17 @@ class Trinity(sc2.BotAI):
         if iteration == 0:
             await self.onStart()
         
-        ###EVERY RACE FUNCTIONS###
+        ###EVERY RACE INTSRUCTIONS###
         # self.remember_enemy_units()
         # self.remember_friendly_units()
         await self.distribute_workers()
         
-        ###TERRAN FUNCTIONS###
+        ###TERRAN INTSRUCTIONS###
         if self.myRace == "Terran":
-            print(self.myRace)
+            await self.buildSCV()
+            await self.buildSupplyDepot()
             
-        ###ZERG FUNCTIONS###
+        ###ZERG INTSRUCTIONS###
         elif self.myRace == "Zerg":
            print(self.myRace)
         
@@ -67,7 +68,19 @@ class Trinity(sc2.BotAI):
                 if self.can_afford(PYLON):
                     await self.build(PYLON, near=nexus.position.towards(self.game_info.map_center, 8))
     ###TERRAN FUNCTIONS###
-    
+     async def buildSCVs(self):
+        if (self.townhalls.amount * 22) > self.units(SCV).amount:
+            if self.units(SCV).amount < 60 and self.can_afford(SCV):
+                for cc in self.townhalls.noqueue:
+                    await self.do(cc.train(SCV))
+
+    async def buildSupplyDepots(self):
+        if self.units(COMMANDCENTER).exists:
+            cc = self.townhalls.random
+            if self.supply_left <= 8 and self.already_pending(SUPPLYDEPOT) < 2 and self.supply_cap < 200:
+                if self.can_afford(SUPPLYDEPOT):
+                    await self.build(SUPPLYDEPOT, near=cc.position.towards(self.game_info.map_center, 8))
+
     ###ZERG FUNCTIONS###
     
     ###USE FUNCTIONS###
