@@ -38,7 +38,7 @@ class Trinity(sc2.BotAI):
         elif self.myRace == "Zerg":
            print(self.myRace)
         
-        ###PROTOSS FUNCTIONS###
+        ###PROTOSS INTSRUCTIONS###
         elif self.myRace == "Protoss":
             await self.buildPylons()
             await self.buildProbes()
