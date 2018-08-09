@@ -84,48 +84,6 @@ class Trinity(sc2.BotAI):
     ###ZERG FUNCTIONS###
     
     ###USE FUNCTIONS###
-    def remember_enemy_units(self):
-        # Every 60 seconds, clear all remembered units (to clear out killed units)
-        # if round(self.get_game_time() % 60) == 0:
-        #    self.remembered_enemy_units_by_tag = {}
-
-        # Look through all currently seen units and add them to list of remembered units (override existing)
-        for unit in self.known_enemy_units:
-            unit.is_known_this_step = True
-            self.remembered_enemy_units_by_tag[unit.tag] = unit
-
-        # Convert to an sc2 Units object and place it in self.remembered_enemy_units
-        self.remembered_enemy_units = sc2.units.Units([], self._game_data)
-        for tag, unit in list(self.remembered_enemy_units_by_tag.items()):
-            # Make unit.is_seen = unit.is_visible
-            if unit.is_known_this_step:
-                unit.is_seen = unit.is_visible  # There are known structures that are not visible
-                unit.is_known_this_step = False  # Set to false for next step
-            else:
-                unit.is_seen = False
-
-            # Units that are not visible while we have friendly units nearby likely don't exist anymore, so delete them
-            if not unit.is_seen and self.units.closer_than(7, unit).exists:
-                del self.remembered_enemy_units_by_tag[tag]
-                continue
-
-            self.remembered_enemy_units.append(unit)
-
-    def remember_friendly_units(self):
-        for unit in self.units:
-            unit.is_taking_damage = False
-
-            # If we already remember this friendly unit
-            if unit.tag in self.remembered_friendly_units_by_tag:
-                health_old = self.remembered_friendly_units_by_tag[unit.tag].health
-                shield_old = self.remembered_friendly_units_by_tag[unit.tag].shield
-
-                # Compare its health/shield since last step, to find out if it has taken any damage
-                if unit.health < health_old or unit.shield < shield_old:
-                    unit.is_taking_damage = True
-
-            self.remembered_friendly_units_by_tag[unit.tag] = unit
-
 run_game(maps.get("(2)CatalystLE"), [
     # Human(Race.Zerg),
     Bot(Race.Protoss, Trinity()),
