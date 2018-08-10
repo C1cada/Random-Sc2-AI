@@ -147,6 +147,19 @@ class Trinity(sc2.BotAI):
                 if self.already_pending(DRONE) <= 4 and self.units(DRONE).amount < 80:
                     if self.units(DRONE).amount < 22 * self.townhalls.amount and self.can_afford(DRONE):
                         await self.do(larva.train(DRONE))
+                        
+     async def buildOverlords(self):
+        if self.units(LARVA).exists:
+            for larva in self.units(LARVA):
+                if self.supply_cap < 200:
+                    if self.supply_left < 7 and self.already_pending(OVERLORD) < 2:
+                        if self.can_afford(OVERLORD):
+                            await self.do(larva.train(OVERLORD))
+
+        if (self.units(LAIR) | self.units(HIVE)).exists and (self.units(OVERSEER) | self.units(OVERLORDCOCOON)).amount < 2:
+            if self.units(OVERLORD).exists and self.can_afford(OVERSEER):
+                ov = self.units(OVERLORD).random
+                await self.do(ov(MORPH_OVERSEER))
 
     ###USE FUNCTIONS###
 run_game(maps.get("(2)CatalystLE"), [
