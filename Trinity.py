@@ -167,6 +167,9 @@ class Trinity(sc2.BotAI):
                 await self.do(ov(MORPH_OVERSEER))
 
     ###USE FUNCTIONS###
+    def get_game_time(self):
+        return self.state.game_loop*0.725*(1/16)
+    
 run_game(maps.get("CatalystLE"), [
     # Human(Race.Zerg),
     Bot(Race.Protoss, Trinity()),
