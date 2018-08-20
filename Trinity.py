@@ -59,9 +59,10 @@ class Trinity(sc2.BotAI):
     ###PROTOSS FUNCTIONS###
     async def buildProbes(self):
         if (self.units(NEXUS).amount * 22) > self.units(PROBE).amount: 
-            if self.units(PROBE).amount < 70 and self.can_afford(PROBE):
+            if self.units(PROBE).amount < 70:
                 for nexus in self.units(NEXUS).noqueue:
-                    await self.do(nexus.train(PROBE))
+                    if self.can_afford(PROBE) and not self.stopWorker:
+                        await self.do(nexus.train(PROBE))
 
     async def buildPylons(self):
         if self.units(NEXUS).exists:
@@ -117,11 +118,12 @@ class Trinity(sc2.BotAI):
                 elif self.can_afford(ZEALOT):
                     await self.do(gt.train(ZEALOT))
     ###TERRAN FUNCTIONS###
-     async def buildSCVs(self):
+    async def buildSCVs(self):
         if (self.townhalls.amount * 22) > self.units(SCV).amount:
-            if self.units(SCV).amount < 60 and self.can_afford(SCV):
+            if self.units(SCV).amount < 60:
                 for cc in self.townhalls.noqueue:
-                    await self.do(cc.train(SCV))
+                    if self.can_afford(SCV) and not self.stopWorker:
+                        await self.do(cc.train(SCV))
 
     async def buildSupplyDepots(self):
         if self.units(COMMANDCENTER).exists:
@@ -147,8 +149,9 @@ class Trinity(sc2.BotAI):
         if self.units(LARVA).exists:
             for larva in self.units(LARVA):
                 if self.already_pending(DRONE) <= 4 and self.units(DRONE).amount < 80:
-                    if self.units(DRONE).amount < 22 * self.townhalls.amount and self.can_afford(DRONE):
-                        await self.do(larva.train(DRONE))
+                    if self.units(DRONE).amount < 22 * self.townhalls.amount and not self.stopWorker:
+                        if self.can_afford(DRONE):
+                            await self.do(larva.train(DRONE))
                         
      async def buildOverlords(self):
         if self.units(LARVA).exists:
@@ -164,7 +167,7 @@ class Trinity(sc2.BotAI):
                 await self.do(ov(MORPH_OVERSEER))
 
     ###USE FUNCTIONS###
-run_game(maps.get("(2)CatalystLE"), [
+run_game(maps.get("CatalystLE"), [
     # Human(Race.Zerg),
     Bot(Race.Protoss, Trinity()),
     # Bot(Race.Protoss, CannonLoverBot())
