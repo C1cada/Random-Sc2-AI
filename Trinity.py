@@ -19,6 +19,8 @@ class Trinity(sc2.BotAI):
     def __init__(self):
         self.myRace = "None"
         self.stopWorker = False
+        self.stopArmy = False
+        self.stopBuild = False
 
     async def on_step(self, iteration):
         if iteration == 0:
