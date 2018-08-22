@@ -144,27 +144,145 @@ class Trinity(sc2.BotAI):
                 await self.do(br.train(MARINE))
 
     ###ZERG FUNCTIONS###
-    
-     async def buildDrones(self):
+        async def buildDrones(self):
         if self.units(LARVA).exists:
             for larva in self.units(LARVA):
                 if self.already_pending(DRONE) <= 4 and self.units(DRONE).amount < 80:
                     if self.units(DRONE).amount < 22 * self.townhalls.amount and not self.stopWorker:
                         if self.can_afford(DRONE):
                             await self.do(larva.train(DRONE))
-                        
-     async def buildOverlords(self):
+
+    async def buildOverlords(self):
         if self.units(LARVA).exists:
             for larva in self.units(LARVA):
                 if self.supply_cap < 200:
                     if self.supply_left < 7 and self.already_pending(OVERLORD) < 2:
-                        if self.can_afford(OVERLORD):
-                            await self.do(larva.train(OVERLORD))
+                        if not self.stopArmy:
+                            if self.can_afford(OVERLORD):
+                                await self.do(larva.train(OVERLORD))
 
-        if (self.units(LAIR) | self.units(HIVE)).exists and (self.units(OVERSEER) | self.units(OVERLORDCOCOON)).amount < 2:
+        if (self.units(LAIR) | self.units(HIVE)).exists and (
+                self.units(OVERSEER) | self.units(OVERLORDCOCOON)).amount < 2:
             if self.units(OVERLORD).exists and self.can_afford(OVERSEER):
                 ov = self.units(OVERLORD).random
                 await self.do(ov(MORPH_OVERSEER))
+
+    async def zergExpand(self):
+        expand_every = 2.5 * 60
+        prefered_base_count = 2 + int(math.floor(self.get_game_time() / expand_every))
+        current_base_count = self.townhalls.amount
+
+        if self.minerals > 900:
+            prefered_base_count += 1
+
+        if current_base_count < prefered_base_count:
+            self.stopWorker = True
+            self.stopArmy = True
+            self.stopBuild = True
+            if current_base_count < (len(self.expansion_locations.keys()) - 3):
+                if self.can_afford(HATCHERY):
+                    await self.expand_now()
+
+        elif current_base_count >= prefered_base_count or self.already_pending(HATCHERY):
+            self.stopWorker = False
+            self.stopArmy = False
+            self.stopBuild = False
+
+    async def buildPool(self):
+        if self.townhalls.exists:
+            if not self.stopBuild:
+                if not (self.units(SPAWNINGPOOL).exists or self.already_pending(SPAWNINGPOOL)):
+                    hq = self.townhalls.random
+                    if self.can_afford(SPAWNINGPOOL):
+                        await self.build(SPAWNINGPOOL, near=hq.position.towards(self.game_info.map_center, 8))
+
+    async def buildWarren(self):
+        if self.townhalls.exists:
+            if not self.stopBuild:
+                if self.units(SPAWNINGPOOL).exists and not self.already_pending(ROACHWARREN) and not self.units(ROACHWARREN).exists:
+                    hq = self.townhalls.random
+                    if self.can_afford(ROACHWARREN):
+                        await self.build(ROACHWARREN, near=hq.position.towards(self.game_info.map_center, 8))
+
+    async def hasLair(self):
+        if(self.units(LAIR).amount > 0):
+            return True
+        morphingYet = False
+        for h in self.units(HATCHERY):
+            if CANCEL_MORPHLAIR in await self.get_available_abilities(h):
+                morphingYet = True
+                break
+        if morphingYet:
+            return True
+        return False
+
+    async def getLair(self):
+        if not self.stopBuild:
+            if self.units(HATCHERY).exists:
+                hq = self.units(HATCHERY).idle.random
+                if self.units(SPAWNINGPOOL).ready.exists and not await self.hasLair():
+                    if not self.units(HIVE).exists or self.units(LAIR).exists:
+                        if self.can_afford(LAIR):
+                            await self.do(hq.build(LAIR))
+
+    async def buildDen(self):
+        if not self.stopBuild:
+            if self.units(LAIR).exists or self.units(HIVE).exists:
+                hq = (self.units(LAIR) | self.units(HIVE)).random
+                if not self.already_pending(HYDRALISKDEN) and not self.units(HYDRALISKDEN).exists:
+                    if self.can_afford(HYDRALISKDEN):
+                        await self.build(HYDRALISKDEN, near=hq.position.towards(self.game_info.map_center, 8))
+
+    async def buildExtractor(self):
+        if self.townhalls.exists:
+            hq = self.townhalls.random
+            if not self.stopBuild:
+                vaspenes = self.state.vespene_geyser.closer_than(15.0, hq)
+                if self.townhalls.amount < 6:
+                    if not self.already_pending(EXTRACTOR) and (
+                            self.units(EXTRACTOR).amount / (self.townhalls.amount * 1.25)) < 1:
+                        for vaspene in vaspenes:
+                            if not self.can_afford(EXTRACTOR):
+                                break
+                            worker = self.select_build_worker(vaspene.position)
+                            if worker is None:
+                                break
+                            if not self.units(EXTRACTOR).closer_than(1.0, vaspene).exists:
+                                await self.do(worker.build(EXTRACTOR, vaspene))
+                elif self.townhalls.amount > 5:
+                    if not self.already_pending(EXTRACTOR):
+                        for vaspene in vaspenes:
+                            if not self.can_afford(EXTRACTOR):
+                                break
+                            worker = self.select_build_worker(vaspene.position)
+                            if worker is None:
+                                break
+                            if not self.units(EXTRACTOR).closer_than(1.0, vaspene).exists:
+                                await self.do(worker.build(EXTRACTOR, vaspene))
+
+    async def zergArmy(self):
+        if not self.stopArmy:
+            if self.units(LARVA).exists:
+                for larva in self.units(LARVA):
+                    if self.units(SPAWNINGPOOL).exists:
+                        if self.units(ROACHWARREN).exists and not self.units(HYDRALISKDEN).exists:
+                            await self.trainZerg(ROACH)
+                        elif self.units(HYDRALISKDEN).exists and not self.units(ROACHWARREN).exists:
+                            await self.trainZerg(HYDRALISK)
+                        elif self.units(ROACHWARREN).exists and self.units(HYDRALISKDEN).exists:
+                            if self.units(ROACH).amount < self.units(HYDRALISK).amount:
+                                await self.trainZerg(ROACH)
+                            else:
+                                await self.trainZerg(HYDRALISK)
+                        else:
+                            await self.trainZerg(ZERGLING)
+
+    async def trainZerg(self, unit):
+        if not self.stopArmy:
+            larva = self.units(LARVA).random
+            if self.can_afford(unit):
+                await self.do(larva.train(unit))
+
 
     ###USE FUNCTIONS###
     def get_game_time(self):
