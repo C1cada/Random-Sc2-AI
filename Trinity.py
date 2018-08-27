@@ -55,6 +55,18 @@ class Trinity(sc2.BotAI):
             self.myRace = "Zerg"
         elif self.townhalls == self.units(NEXUS):
             self.myRace = "Protoss"
+            
+    async def attackRally(self):
+        for unit in self.armyUnits.idle:
+            attack_location = self.get_rally_location()
+            await self.do(unit.attack(attack_location))
+
+    async def getGases(self):
+        if self.minerals > 0 and self.vespene > 0:
+            if (self.minerals / self.vespene) >= 3 and self.gases <= 1:
+                self.gases += 0.25
+            elif (self.vespene / self.minerals) >= 3 and self.gases >= 1:
+                self.gases += -0.25
 
     ###PROTOSS FUNCTIONS###
     async def buildProbes(self):
@@ -144,10 +156,10 @@ class Trinity(sc2.BotAI):
                 await self.do(br.train(MARINE))
 
     ###ZERG FUNCTIONS###
-        async def buildDrones(self):
+    async def buildDrones(self):
         if self.units(LARVA).exists:
             for larva in self.units(LARVA):
-                if self.already_pending(DRONE) <= 4 and self.units(DRONE).amount < 80:
+                if self.already_pending(DRONE) <= 2 and self.units(DRONE).amount < 75:
                     if self.units(DRONE).amount < 22 * self.townhalls.amount and not self.stopWorker:
                         if self.can_afford(DRONE):
                             await self.do(larva.train(DRONE))
@@ -175,15 +187,15 @@ class Trinity(sc2.BotAI):
         if self.minerals > 900:
             prefered_base_count += 1
 
-        if current_base_count < prefered_base_count:
-            self.stopWorker = True
-            self.stopArmy = True
-            self.stopBuild = True
-            if current_base_count < (len(self.expansion_locations.keys()) - 3):
+        if current_base_count < (len(self.expansion_locations.keys()) - (len(self.expansion_locations.keys()) / 2)):
+            if current_base_count < prefered_base_count:
+                self.stopWorker = True
+                self.stopArmy = True
+                self.stopBuild = True
                 if self.can_afford(HATCHERY):
-                    await self.expand_now()
+                    await self.expandNow(HATCHERY)
 
-        elif current_base_count >= prefered_base_count or self.already_pending(HATCHERY):
+        if current_base_count >= prefered_base_count or self.already_pending(HATCHERY):
             self.stopWorker = False
             self.stopArmy = False
             self.stopBuild = False
@@ -218,7 +230,7 @@ class Trinity(sc2.BotAI):
 
     async def getLair(self):
         if not self.stopBuild:
-            if self.units(HATCHERY).exists:
+            if self.units(HATCHERY).idle.exists:
                 hq = self.units(HATCHERY).idle.random
                 if self.units(SPAWNINGPOOL).ready.exists and not await self.hasLair():
                     if not self.units(HIVE).exists or self.units(LAIR).exists:
@@ -240,7 +252,7 @@ class Trinity(sc2.BotAI):
                 vaspenes = self.state.vespene_geyser.closer_than(15.0, hq)
                 if self.townhalls.amount < 6:
                     if not self.already_pending(EXTRACTOR) and (
-                            self.units(EXTRACTOR).amount / (self.townhalls.amount * 1.25)) < 1:
+                            self.units(EXTRACTOR).amount / (self.townhalls.amount * self.gases)) < 1:
                         for vaspene in vaspenes:
                             if not self.can_afford(EXTRACTOR):
                                 break
@@ -283,11 +295,38 @@ class Trinity(sc2.BotAI):
             if self.can_afford(unit):
                 await self.do(larva.train(unit))
 
+    async def buildQueens(self):
+        if self.townhalls.exists:
+            for hq in self.townhalls.noqueue.ready:
+                if self.units(SPAWNINGPOOL).ready.exists:
+                    if self.units(QUEEN).amount < (self.townhalls.amount * 1.2):
+                        if self.can_afford(QUEEN) and self.units(QUEEN).amount < 10:
+                            await self.do(hq.train(QUEEN))
 
     ###USE FUNCTIONS###
+    def get_rally_location(self):
+        if self.townhalls.exists:
+            hq = self.townhalls.closest_to(self.game_info.map_center).position
+            rally_location = hq.position.towards(self.game_info.map_center, 8)
+            return rally_location
+
     def get_game_time(self):
         return self.state.game_loop*0.725*(1/16)
-    
+
+    async def expandNow(self, townhall, building=None, max_distance=10, location=None):
+        """Takes new expansion."""
+
+        if not building:
+            building = self.townhalls.first.type_id
+
+        assert isinstance(building, UnitTypeId)
+
+        if not location:
+            location = await self.get_next_expansion()
+
+        if self.can_afford(townhall):
+            await self.build(building, near=location, max_distance=max_distance, random_alternative=False,
+                             placement_step=1)
 run_game(maps.get("CatalystLE"), [
     # Human(Race.Zerg),
     Bot(Race.Protoss, Trinity()),
