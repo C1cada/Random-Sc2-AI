@@ -1,1 +1,1 @@
-# DMGSC2AI
+# Trinity
