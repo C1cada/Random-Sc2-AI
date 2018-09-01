@@ -327,6 +327,33 @@ class Trinity(sc2.BotAI):
         if self.can_afford(townhall):
             await self.build(building, near=location, max_distance=max_distance, random_alternative=False,
                              placement_step=1)
+            
+    async def has_ability(self, ability, unit):
+        abilities = await self.get_available_abilities(unit)
+        if ability in abilities:
+            return True
+        else:
+            return False
+
+    def get_base_build_location(self, base, min_distance=10, max_distance=15):
+        return base.position.towards(self.get_game_center_random(), random.randrange(min_distance, max_distance))
+
+    def get_game_center_random(self, offset_x=50, offset_y=50):
+        x = self.game_info.map_center.x
+        y = self.game_info.map_center.y
+
+        rand = random.random()
+        if rand < 0.2:
+            x += offset_x
+        elif rand < 0.4:
+            x -= offset_x
+        elif rand < 0.6:
+            y += offset_y
+        elif rand < 0.8:
+            y -= offset_y
+
+        return sc2.position.Point2((x, y))
+
 run_game(maps.get("CatalystLE"), [
     # Human(Race.Zerg),
     Bot(Race.Protoss, Trinity()),
