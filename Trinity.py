@@ -1209,22 +1209,20 @@ class Trinity(sc2.BotAI):
                         elif self.units(SPIRE).exists or self.units(GREATERSPIRE).exists:
                             await self.trainZerg(CORRUPTOR)
 
-
     async def runbyGroupAdding(self):
-        for z in self.units(ZERGLING).ready:
-            print("ready")
-            if self.units(ZERGLING).filter(lambda z: z.tag not in self.runbyGroup).amount > 20:
-                print("go")
-                cg = ControlGroup(self.units(ZERGLING).filter(lambda z: z.tag not in self.runbyGroup).ready)
-                if self.runbyGroup1 is None:
-                    print("1")
-                    self.runbyGroup1.add(cg)
-                elif self.runbyGroup2 is None:
-                    self.runbyGroup2.add(cg)
-                    print("2")
-                elif self.runbyGroup3 is None:
-                    print("3")
-                    self.runbyGroup3.add(cg)
+        for z in self.units(ZERGLING).filter(lambda z: z.tag not in self.runbyGroup).ready:
+            if len(self.runbyGroup1) < 20:
+                print("1")
+                self.runbyGroup1.add(z)
+                self.runbyGroup.add(z)
+            elif len(self.runbyGroup2) < 20:
+                print("2")
+                self.runbyGroup2.add(z)
+                self.runbyGroup.add(z)
+            elif len(self.runbyGroup3) < 20:
+                print("3")
+                self.runbyGroup3.add(z)
+                self.runbyGroup.add(z)
 
     async def runby(self):
         for ac in list(self.runbyGroup1):
@@ -1263,6 +1261,16 @@ class Trinity(sc2.BotAI):
                 if self.units(SPINECRAWLER).closer_than(10, hq).amount < 1:
                     if self.can_afford(SPINECRAWLER) and not self.already_pending(SPINECRAWLER):
                         await self.build(SPINECRAWLER, near=hq)
+                        
+    async def roachSpeed(self):
+        if self.units(ROACHWARREN).exists:
+            rw = self.units(ROACHWARREN).first
+            if rw.noqueue:
+                if (self.units(LAIR).exists or self.units(HIVE).exists) and not self.already_pending(LAIR):
+                    if await self.has_ability(RESEARCH_GLIALREGENERATION, rw):
+                        if self.can_afford(RESEARCH_GLIALREGENERATION):
+                            await self.do(rw(RESEARCH_GLIALREGENERATION))
+                            
     ###USE FUNCTIONS###
     def get_rally_location(self):
         if self.townhalls.exists:
