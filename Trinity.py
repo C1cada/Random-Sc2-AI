@@ -38,30 +38,42 @@ class Trinity(sc2.BotAI):
         self.creepTargetCountsAsReachedDistance = 10  # was 25
         self.creepSpreadInterval = 10
         self.stopMakingNewTumorsWhenAtCoverage = 0.5  # stops queens from putting down new tumors and save up transfuse energy
-        self.runbyGroup1 = set()
-        self.runbyGroup2 = set()
-        self.runbyGroup3 = set()
-        self.runbyGroup = set()
-
+        self.runbyGroup1 = []
+        self.runbyGroup2 = []
+        self.runbyGroup3 = []
+        self.runbyGroup = []
+        self.units_to_ignore = [DRONE, SCV, PROBE, EGG, LARVA, OVERLORD, OVERSEER, OBSERVER, BROODLING, INTERCEPTOR,
+                                MEDIVAC, CREEPTUMOR, CREEPTUMORBURROWED, CREEPTUMORQUEEN, CREEPTUMORMISSILE]
+        self.scouter = None
+        self.scout_tag = None
+        self.nearby = False
+        self.dropMedivac = None
+        self.dropMarines = []
 
     async def on_step(self, iteration):
         if iteration == 0:
             await self.onStart()
         self.iteration = iteration
-        self.armyUnits = self.units(RAVEN).ready | self.units(ROACH).ready | self.units(ZERGLING).filter(lambda z: z.tag not in self.runbyGroup).ready | self.units(HYDRALISK).ready | self.units(MARINE).ready | self.units(MARAUDER).ready | self.units(SIEGETANK).ready | self.units(ZEALOT).ready | self.units(IMMORTAL).ready | self.units(STALKER).ready | self.units(OBSERVER).ready | self.units(OVERSEER).ready
+        self.armyUnits = self.units(ROACH).ready | self.units(ZERGLING).filter(
+            lambda z: z.tag not in self.runbyGroup).ready | self.units(HYDRALISK).ready | self.units(
+            MARINE).ready | self.units(MARAUDER).ready | self.units(SIEGETANK).ready | self.units(
+            ZEALOT).ready | self.units(IMMORTAL).ready | self.units(STALKER).ready | self.units(CORRUPTOR).ready | self.units(BROODLORD).ready | self.units(CARRIER)
 
         ###EVERY RACE INTSRUCTIONS###
         # self.remember_enemy_units()
         # self.remember_friendly_units()
         await self.attackRally()
-        await self.distribute_workers()
+        await self.distributeWorkers()
         await self.getGases()
-        #await self.attack()
+        await self.attack()
         await self.defend()
         await self.expandingTime()
-        #print(self.barracksAddedon)
-        #print(self.expandTime)
-        #print(self.stopBuild)
+        await self.scout()
+        # await self.nearbyUnits()
+        # print(self.barracksAddedon)
+        # print(self.expandTime)
+        # print(self.stopBuild)
+        #print(self.stopArmy)
 
         ###TERRAN INTSRUCTIONS###
         if self.myRace == "Terran":
@@ -94,19 +106,24 @@ class Trinity(sc2.BotAI):
             await self.buildBay()
             await self.bayUpgrades()
             await self.buildArmory()
+            await self.moveRaven()
+            # await self.chooseMedivac()
+            # await self.assignMarines()
+            # await self.loadMedivac()
 
 
         ###ZERG INTSRUCTIONS###
         elif self.myRace == "Zerg":
             await self.zergExpand()
             await self.upgradeHive()
-            await self.buildDrones()
             await self.buildOverlords()
             await self.buildPool()
             await self.buildWarren()
             await self.getLair()
             await self.buildExtractor()
+            await self.buildDrones()
             await self.zergArmy()
+            await self.buildDrones()
             await self.buildDen()
             await self.buildQueens()
             await self.doQueenInjects(iteration)
@@ -115,10 +132,22 @@ class Trinity(sc2.BotAI):
             await self.buildInfestation()
             await self.buildSpire()
             await self.greaterSpire()
+            await self.broodlords()
             await self.trainLateZerg()
             await self.runby()
             await self.runbyGroupAdding()
             await self.spine()
+            await self.roachSpeed()
+            await self.lingSpeed()
+            await self.hydraRange()
+            await self.hydraSpeed()
+            await self.burrow()
+            await self.burrowMicro()
+            await self.moveOverseer()
+            await self.upgradesZerg()
+            await self.buildEvochamber()
+
+
 
         ###PROTOSS INTSRUCTIONS###
         elif self.myRace == "Protoss":
@@ -142,6 +171,10 @@ class Trinity(sc2.BotAI):
             await self.buildForge()
             await self.upgrades()
             await self.blinkAway()
+            await self.stargate()
+            await self.fleetBeacon()
+            await self.buildCarrier()
+            await self.moveObserver()
 
         await self.execute_order_queue()
 
@@ -172,17 +205,26 @@ class Trinity(sc2.BotAI):
 
     async def attack(self):
         if not self.defending:
+            if self.supply_used < self.attackSupply - 20:
+                self.attacking = False
             if self.supply_used > self.attackSupply or self.attacking:
                 self.attacking = True
                 for unit in self.armyUnits.idle:
                     await self.do(unit.attack(self.find_target(self.state).position))
-            if self.supply_used < self.attackSupply - 40:
-                self.attacking = False
+
+        if self.units(HIVE).exists:
+            if not self.defending:
+                if self.supply_used < self.attackSupply - 20:
+                    self.attacking = False
+                if (self.supply_used > self.attackSupply and self.units(BROODLORD).amount > 5) or self.attacking:
+                    self.attacking = True
+                    for unit in self.armyUnits.idle:
+                        await self.do(unit.attack(self.find_target(self.state).position))
 
     async def defend(self):
         enemiesCloseToTh = None
         for th in self.townhalls:
-            enemiesCloseToTh = self.known_enemy_units.closer_than(self.defendRangeToTownhalls, th.position)
+            enemiesCloseToTh = self.known_enemy_units.closer_than(30, th.position)
         if enemiesCloseToTh and not self.attacking:
             self.defending = True
             for unit in self.armyUnits.idle:
@@ -203,6 +245,75 @@ class Trinity(sc2.BotAI):
             self.expandTime += 1
             self.added = True
 
+    async def scout(self):
+        if self.workers.exists:
+            if self.units.find_by_tag(self.scouter) == None:
+                worker = self.workers.random
+                self.scouter = worker.tag
+                scout = self.workers.find_by_tag(self.scouter)
+                if self.get_game_time() < 120:
+                    random_exp_location = random.choice(self.enemy_start_locations)
+                else:
+                    random_exp_location = random.choice(list(self.expansion_locations.keys()))
+                await self.do(scout.move(random_exp_location))
+
+            scout = self.workers.find_by_tag(self.scouter)
+            if self.get_game_time() < 180:
+                random_exp_location = random.choice(self.enemy_start_locations)
+            else:
+                random_exp_location = random.choice(list(self.expansion_locations.keys()))
+
+            if scout.is_idle:
+
+                await self.do(scout.move(random_exp_location))
+
+            # Basic avoidance: If enemy is too close, go to map center
+            nearby_enemy_units = self.known_enemy_units.not_structure.filter(lambda unit: unit.type_id not in self.units_to_ignore).closer_than(5, scout)
+            if nearby_enemy_units.exists:
+
+                new_random_exp_location = random.choice(list(self.expansion_locations.keys()))
+
+                random_exp_location = new_random_exp_location
+                await self.do(scout.move(random_exp_location))
+
+            # We're close enough, so change target
+            if scout.distance_to(random_exp_location) < 1:
+                random_exp_location = random.choice(list(self.expansion_locations.keys()))
+                await self.do(scout.move(random_exp_location))
+
+    # async def check_enemy_supply(self):
+    #     army_units = self.units(ROACH).ready | self.units(HYDRALISK).ready | self.units(OVERSEER).ready | self.units(MUTALISK).ready | self.units(ZERGLING).ready | self.units(BANELING).ready | self.units(BROODLORD).ready | self.units(CORRUPTOR).ready
+    #     self.enemy_supply = 0
+    #     EnemyUnits = self.remembered_enemy_units.not_structure.filter(lambda x:x.type_id not in self.not_attack_units)
+    #     #print(enemyUnitData)
+    #     #print(vars(enemyUnitData))
+    #     self.enemy_supply = sum([unit._type_data._proto.food_required for unit in EnemyUnits])
+    #     self.my_supply = sum([unit._type_data._proto.food_required for unit in army_units])
+    #     if self.enemy_supply > (self.my_supply * 1.5) and not self.expanding and not self.emergency and not self.get_game_time() > 180:
+    #         self.panic = True
+    #         self.stop_worker = True
+    #         #print("Panic")
+    #     elif self.enemy_supply <= self.my_supply and self.panic:
+    #         self.panic = False
+    #         self.stop_worker = False
+
+    async def nearbyUnits(self):
+        enemiesCloseToTh = None
+        enemySupply = 0
+        mySupply = sum([unit._type_data._proto.food_required for unit in self.armyUnits])
+        for th in self.townhalls.ready:
+            enemiesCloseToTh = self.known_enemy_units.closer_than(self.defendRangeToTownhalls, th.position)
+            enemySupply = sum([unit._type_data._proto.food_required for unit in enemiesCloseToTh])
+        if not enemiesCloseToTh and self.nearby:
+            self.stopWorker = False
+            self.nearby = False
+        if enemySupply > mySupply:
+            print("uh oh")
+            self.stopWorker = True
+            self.nearby = True
+
+    async def checkRush(self):
+        i = 2
     ###PROTOSS FUNCTIONS###
     async def buildProbes(self):
         if (self.townhalls.amount * 22) > self.units(PROBE).amount:
@@ -214,13 +325,14 @@ class Trinity(sc2.BotAI):
     async def buildPylons(self):
         if self.units(NEXUS).exists:
             nexus = self.units(NEXUS).random
-            if self.supply_left <= 8 and self.already_pending(PYLON) < 2 and self.supply_cap < 200:
+            if self.supply_left <= 10 and self.already_pending(PYLON) < 2 and self.supply_cap < 200:
                 if self.can_afford(PYLON):
                     await self.build(PYLON, near=self.get_base_build_location(nexus, min_distance=5))
 
     async def buildGateway(self):
         if self.units(PYLON).exists and self.can_afford(GATEWAY):
-            if self.units(GATEWAY).amount + self.units(WARPGATE).amount < 1.5 * self.townhalls.amount and self.units(GATEWAY).amount + self.units(WARPGATE).amount < 6:
+            if self.units(GATEWAY).amount + self.units(WARPGATE).amount < 1.5 * self.townhalls.amount and self.units(
+                    GATEWAY).amount + self.units(WARPGATE).amount < 6:
                 pylon = self.units(PYLON).random
                 await self.build(GATEWAY, near=pylon.position.towards(self.game_info.map_center))
 
@@ -235,18 +347,16 @@ class Trinity(sc2.BotAI):
             hq = self.townhalls.random
             if not self.stopBuild:
                 vaspenes = self.state.vespene_geyser.closer_than(15.0, hq)
-                if self.townhalls.amount < 6:
-                    if not self.already_pending(ASSIMILATOR) and (
-                            self.units(ASSIMILATOR).amount / (self.townhalls.amount * self.gases)) < 1:
-                        for vaspene in vaspenes:
-                            if not self.can_afford(ASSIMILATOR):
-                                break
-                            worker = self.select_build_worker(vaspene.position)
-                            if worker is None:
-                                break
-                            if not self.units(ASSIMILATOR).closer_than(1.0, vaspene).exists:
-                                await self.do(worker.build(ASSIMILATOR, vaspene))
-
+                if not self.already_pending(ASSIMILATOR) and (
+                        self.units(ASSIMILATOR).amount / (self.townhalls.amount * self.gases)) < 1:
+                    for vaspene in vaspenes:
+                        if not self.can_afford(ASSIMILATOR):
+                            break
+                        worker = self.select_build_worker(vaspene.position)
+                        if worker is None:
+                            break
+                        if not self.units(ASSIMILATOR).closer_than(1.0, vaspene).exists:
+                            await self.do(worker.build(ASSIMILATOR, vaspene))
 
     async def handleChronoboost(self):
         if self.units(NEXUS).exists:
@@ -288,6 +398,9 @@ class Trinity(sc2.BotAI):
         prefered_base_count = 1 + int(math.floor(self.get_game_time() / expand_every))
         current_base_count = self.townhalls.amount
 
+        if self.nearby:
+            prefered_base_count = 0
+
         if self.minerals > 900:
             prefered_base_count += 1
 
@@ -299,47 +412,49 @@ class Trinity(sc2.BotAI):
                 if self.can_afford(NEXUS) and not self.already_pending(NEXUS):
                     await self.expandNow(NEXUS)
 
-        if current_base_count >= prefered_base_count or self.already_pending(NEXUS):
+        if current_base_count >= prefered_base_count or self.already_pending(NEXUS) and not self.nearby:
             self.stopWorker = False
             self.stopArmy = False
             self.stopBuild = False
 
     async def trainGateway(self):
         if not self.stopArmy:
-            for gt in self.units(GATEWAY).ready:
-                if gt.noqueue:
-                    if await self.has_ability(MORPH_WARPGATE, gt):
-                        # if self.can_afford(MORPH_WARPGATE):
-                        await self.do(gt(MORPH_WARPGATE))
-                        return
-                    elif self.can_afford(STALKER) and self.can_afford(ZEALOT):
-                        if self.units(CYBERNETICSCORE).exists:
-                            if self.units(STALKER).amount * 2 < self.units(ZEALOT).amount:
-                                if self.can_afford(STALKER):
-                                    await self.do(gt.train(STALKER))
+            if not self.units(FLEETBEACON).exists:
+                for gt in self.units(GATEWAY).ready:
+                    if gt.noqueue:
+                        if await self.has_ability(MORPH_WARPGATE, gt):
+                            # if self.can_afford(MORPH_WARPGATE):
+                            await self.do(gt(MORPH_WARPGATE))
+                            return
+                        elif self.can_afford(STALKER) and self.can_afford(ZEALOT):
+                            if self.units(CYBERNETICSCORE).exists:
+                                if self.units(STALKER).amount * 2 < self.units(ZEALOT).amount:
+                                    if self.can_afford(STALKER):
+                                        await self.do(gt.train(STALKER))
+                                elif self.can_afford(ZEALOT):
+                                    await self.do(gt.train(ZEALOT))
                             elif self.can_afford(ZEALOT):
                                 await self.do(gt.train(ZEALOT))
-                        elif self.can_afford(ZEALOT):
-                            await self.do(gt.train(ZEALOT))
 
     async def warpGateway(self):
         if not self.stopArmy:
-            for warpgate in self.units(WARPGATE).ready:
-                # We check for WARPGATETRAIN_ZEALOT to see if warpgate is ready to warp in
-                if await self.has_ability(WARPGATETRAIN_ZEALOT, warpgate):
-                    if self.units(PYLON).exists:
-                        if self.units(WARPPRISMPHASING).exists:
-                            pylon = self.units(WARPPRISMPHASING).random
-                        else:
-                            pylon = self.units(PYLON).ready.random
-                        if self.units(CYBERNETICSCORE).exists:
-                            if self.units(STALKER).amount * 2 < self.units(ZEALOT).amount:
-                                if self.can_afford(STALKER):
-                                    await self.warp_in(STALKER, pylon, warpgate)
+            if not self.units(FLEETBEACON).exists:
+                for warpgate in self.units(WARPGATE).ready:
+                    # We check for WARPGATETRAIN_ZEALOT to see if warpgate is ready to warp in
+                    if await self.has_ability(WARPGATETRAIN_ZEALOT, warpgate):
+                        if self.units(PYLON).exists:
+                            if self.units(WARPPRISMPHASING).exists:
+                                pylon = self.units(WARPPRISMPHASING).random
+                            else:
+                                pylon = self.units(PYLON).ready.random
+                            if self.units(CYBERNETICSCORE).exists:
+                                if self.units(STALKER).amount * 2 < self.units(ZEALOT).amount:
+                                    if self.can_afford(STALKER):
+                                        await self.warp_in(STALKER, pylon, warpgate)
+                                elif self.can_afford(ZEALOT):
+                                    await self.warp_in(ZEALOT, pylon, warpgate)
                             elif self.can_afford(ZEALOT):
                                 await self.warp_in(ZEALOT, pylon, warpgate)
-                        elif self.can_afford(ZEALOT):
-                            await self.warp_in(ZEALOT, pylon, warpgate)
 
     async def getWarpgate(self):
         if self.units(CYBERNETICSCORE).ready.exists:
@@ -371,7 +486,8 @@ class Trinity(sc2.BotAI):
             return error
 
     async def buildRobo(self):
-        if self.units(CYBERNETICSCORE).ready.exists and self.units(ROBOTICSFACILITY).amount < 0.5 * self.townhalls.amount and self.units(ROBOTICSFACILITY).amount < 2:
+        if self.units(CYBERNETICSCORE).ready.exists and self.units(
+                ROBOTICSFACILITY).amount < 0.5 * self.townhalls.amount and self.units(ROBOTICSFACILITY).amount < 2:
             pylon = self.units(PYLON).ready.random
             if self.can_afford(ROBOTICSFACILITY) and not self.already_pending(ROBOTICSFACILITY):
                 await self.build(ROBOTICSFACILITY, near=pylon)
@@ -400,15 +516,16 @@ class Trinity(sc2.BotAI):
                         await self.do(tc(RESEARCH_BLINK))
 
     async def buildImmo(self):
-        if self.units(ROBOTICSFACILITY).exists:
-            if not self.stopArmy:
-                for rf in self.units(ROBOTICSFACILITY).ready.noqueue:
-                    if not self.units(OBSERVER).exists:
-                        await self.do(rf.train(OBSERVER))
-                    if self.units(WARPPRISM).amount < 2:
-                        await self.do(rf.train(WARPPRISM))
-                    if self.can_afford(IMMORTAL):
-                        await self.do(rf.train(IMMORTAL))
+        if not self.units(FLEETBEACON).exists:
+            if self.units(ROBOTICSFACILITY).exists:
+                if not self.stopArmy:
+                    for rf in self.units(ROBOTICSFACILITY).ready.noqueue:
+                        if not self.units(OBSERVER).exists:
+                            await self.do(rf.train(OBSERVER))
+                        if self.units(WARPPRISM).amount < 2:
+                            await self.do(rf.train(WARPPRISM))
+                        if self.can_afford(IMMORTAL):
+                            await self.do(rf.train(IMMORTAL))
 
     async def prismMicro(self):
         target = None
@@ -421,7 +538,7 @@ class Trinity(sc2.BotAI):
                 await self.do(prism.attack(lowest_health.position))
 
         if self.units(WARPPRISM).exists:
-            for immo in self.armyUnits.ready:
+            for immo in self.units(IMMORTAL).ready:
                 if immo.shield < 15 and immo.health < immo.health_max / 2:
                     target = immo
                     break
@@ -438,12 +555,13 @@ class Trinity(sc2.BotAI):
             nearby_enemy_units = self.known_enemy_units.closer_than(10, prism)
             if nearby_enemy_units.amount > 5:
                 await self.do(prism(MORPH_WARPPRISMPHASINGMODE))
+
         for prism in self.units(WARPPRISMPHASING).ready:
             nearby_enemy_units = self.known_enemy_units.closer_than(10, prism)
             if nearby_enemy_units.amount < 2:
                 await self.do(prism(MORPH_WARPPRISMTRANSPORTMODE))
 
-        for immo in self.armyUnits.ready:
+        for immo in self.units(IMMORTAL).ready:
             if immo.shield < 15 and immo.health < immo.health_max / 2:
                 target = immo
                 break
@@ -468,9 +586,12 @@ class Trinity(sc2.BotAI):
                 for forge in self.units(FORGE).ready:
                     if forge.noqueue:
                         for upgrade_level in range(1, 4):
-                            upgrade_armor_id = getattr(sc2.constants, "FORGERESEARCH_PROTOSSGROUNDWEAPONSLEVEL" + str(upgrade_level))
-                            upgrade_missle_id = getattr(sc2.constants, "FORGERESEARCH_PROTOSSGROUNDARMORLEVEL" + str(upgrade_level))
-                            upgrade_melee_id = getattr(sc2.constants, "FORGERESEARCH_PROTOSSSHIELDSLEVEL" + str(upgrade_level))
+                            upgrade_armor_id = getattr(sc2.constants,
+                                                       "FORGERESEARCH_PROTOSSGROUNDWEAPONSLEVEL" + str(upgrade_level))
+                            upgrade_missle_id = getattr(sc2.constants,
+                                                        "FORGERESEARCH_PROTOSSGROUNDARMORLEVEL" + str(upgrade_level))
+                            upgrade_melee_id = getattr(sc2.constants,
+                                                       "FORGERESEARCH_PROTOSSSHIELDSLEVEL" + str(upgrade_level))
                             if await self.has_ability(upgrade_missle_id, forge):
                                 if self.can_afford(upgrade_missle_id):
                                     await self.do(forge(upgrade_missle_id))
@@ -489,6 +610,35 @@ class Trinity(sc2.BotAI):
                     escape_location = st.position.towards(home_location, 4)
                     await self.do(st(EFFECT_BLINK_STALKER, escape_location))
 
+
+    async def stargate(self):
+        if self.get_game_time() > 800:
+            if self.units(STARGATE).amount < 6 and self.units(STARGATE).amount <= self.townhalls.amount:
+                if self.can_afford(STARGATE):
+                    pylon = self.units(PYLON).ready.random
+                    await self.build(STARGATE, near=pylon)
+
+    async def fleetBeacon(self):
+        if self.units(STARGATE).exists:
+            if self.can_afford(FLEETBEACON) and not self.already_pending(FLEETBEACON):
+                if not self.units(FLEETBEACON).exists:
+                    pylon = self.units(PYLON).ready.random
+                    await self.build(FLEETBEACON, near=pylon)
+
+    async def buildCarrier(self):
+        if self.units(FLEETBEACON).exists and self.units(STARGATE).exists:
+            if not self.stopArmy:
+                for rf in self.units(STARGATE).ready.noqueue:
+                    await self.do(rf.train(CARRIER))
+
+    async def moveObserver(self):
+        if self.armyUnits.exists:
+            lowest_health = self.armyUnits.random
+            for unit in self.armyUnits:
+                if unit.health < lowest_health.health:
+                    lowest_health = unit
+            for medic in self.units(OBSERVER).ready.idle:
+                await self.do(medic.attack(lowest_health.position))
         ###TERRAN FUNCTIONS###
 
     async def buildSCVs(self):
@@ -502,7 +652,7 @@ class Trinity(sc2.BotAI):
         if not self.stopBuild:
             if self.units(COMMANDCENTER).exists:
                 cc = self.townhalls.random
-                if self.supply_left <= 8 and self.already_pending(SUPPLYDEPOT) < 3 and self.supply_cap < 200:
+                if self.supply_left <= 10 and self.already_pending(SUPPLYDEPOT) < 3 and self.supply_cap < 200:
                     if self.can_afford(SUPPLYDEPOT):
                         await self.build(SUPPLYDEPOT, near=cc.position.towards(self.game_info.map_center, 8))
 
@@ -515,7 +665,6 @@ class Trinity(sc2.BotAI):
                             if self.can_afford(BARRACKS):
                                 cc = self.townhalls.random
                                 await self.build(BARRACKS, near=cc.position.towards(self.game_info.map_center, 8))
-
 
     async def buildRefinery(self):
         if self.townhalls.exists:
@@ -534,7 +683,6 @@ class Trinity(sc2.BotAI):
                             if not self.units(REFINERY).closer_than(1.0, vaspene).exists:
                                 await self.do(worker.build(REFINERY, vaspene))
 
-
     async def buildAdddon(self):
         if not self.stopBuild:
             for b in self.units(BARRACKS).ready:
@@ -552,12 +700,16 @@ class Trinity(sc2.BotAI):
     async def checkAddon(self):
         if self.barracksAddedon:
             for b in self.barracksAddedon:
-                if self.iteration % 10 == 0:
+                if self.iteration % 50 == 0:
                     my_reactors = self.units(BARRACKSREACTOR).tags
                     my_techlabs = self.units(BARRACKSTECHLAB).tags
+                    #print(my_techlabs)
                     if await self.buildingAddon():
                         self.barracksAddedon.remove(b)
-                    if b.add_on_tag != my_reactors and b.add_on_tag != my_techlabs:
+                    if b.add_on_tag == my_techlabs or b.add_on_tag == my_reactors:
+                        self.barracksAddedon.remove(b)
+                    elif b.add_on_tag != my_reactors and b.add_on_tag != my_techlabs and await self.has_ability(BUILD_TECHLAB_BARRACKS, b):
+                        #print(b.add_on_tag)
                         await self.do(b(LIFT_BARRACKS))
 
     async def landBarracks(self):
@@ -584,6 +736,9 @@ class Trinity(sc2.BotAI):
         prefered_base_count = 1 + int(math.floor(self.get_game_time() / expand_every))
         current_base_count = self.townhalls.amount
 
+        if self.nearby:
+            prefered_base_count = 0
+
         if self.minerals > 900:
             prefered_base_count += 1
 
@@ -595,7 +750,7 @@ class Trinity(sc2.BotAI):
                 if self.can_afford(COMMANDCENTER) and not self.already_pending(COMMANDCENTER):
                     await self.expandNow(COMMANDCENTER)
 
-        if current_base_count >= prefered_base_count or self.already_pending(COMMANDCENTER):
+        if current_base_count >= prefered_base_count or self.already_pending(COMMANDCENTER) and not self.nearby:
             self.stopWorker = False
             self.stopArmy = False
             self.stopBuild = False
@@ -603,28 +758,29 @@ class Trinity(sc2.BotAI):
     async def buildBio(self):
         rally_location = self.get_rally_location()
         if self.units(BARRACKS).exists:
-            for b in self.units(BARRACKS).noqueue:
+            for b in self.units(BARRACKS):
                 my_reactors = self.units(BARRACKSREACTOR).tags
                 my_techlabs = self.units(BARRACKSTECHLAB).tags
                 if b.add_on_tag != my_reactors and b.add_on_tag != my_techlabs:
                     await self.do(b(RALLY_BUILDING, rally_location))
                     if not self.stopArmy:
                         if b.add_on_tag in my_techlabs:
-                            if self.can_afford(MARAUDER):
+                            if self.can_afford(MARAUDER) and len(b.orders) < 1:
                                 await self.do(b.train(MARAUDER))
                         if b.add_on_tag in my_reactors:
-                            if self.minerals > 100:
+                            if self.minerals > 50 and len(b.orders) < 2:
                                 await self.do(b.train(MARINE))
-                                await self.do(b.train(MARINE))
+
 
     async def depoMicro(self):
         for depo in self.units(SUPPLYDEPOT).ready:
-                await self.do(depo(MORPH_SUPPLYDEPOT_LOWER))
+            await self.do(depo(MORPH_SUPPLYDEPOT_LOWER))
 
     async def buildFactory(self):
         if not self.stopBuild:
             if self.units(BARRACKS).exists and self.townhalls.exists:
-                if (self.units(FACTORY).amount + self.units(FACTORYFLYING).amount) < self.townhalls.amount / 2 and (self.units(FACTORY).amount + self.units(FACTORYFLYING).amount) < 2:
+                if (self.units(FACTORY).amount + self.units(FACTORYFLYING).amount) < self.townhalls.amount / 2 and (
+                        self.units(FACTORY).amount + self.units(FACTORYFLYING).amount) < 2:
                     if self.can_afford(FACTORY):
                         cc = self.townhalls.random
                         await self.build(FACTORY, near=cc.position.towards(self.game_info.map_center, 8))
@@ -654,11 +810,11 @@ class Trinity(sc2.BotAI):
     async def checkFacAddon(self):
         if self.facAddedon:
             for b in self.facAddedon:
-                if self.iteration % 10 == 0:
+                if self.iteration % 50 == 0:
                     my_techlabs = self.units(FACTORYTECHLAB).tags
                     if await self.buildingFacAddon():
                         self.facAddedon.remove(b)
-                    if b.add_on_tag != my_techlabs:
+                    if b.add_on_tag != my_techlabs and await self.has_ability(BUILD_TECHLAB_FACTORY, b):
                         await self.do(b(LIFT_FACTORY))
 
     async def landFac(self):
@@ -691,7 +847,8 @@ class Trinity(sc2.BotAI):
         if not self.stopBuild:
             if self.townhalls.amount > 1:
                 if self.units(FACTORY).exists and self.townhalls.exists:
-                    if (self.units(STARPORT).amount + self.units(STARPORTFLYING).amount) < self.townhalls.amount / 2 and (
+                    if (self.units(STARPORT).amount + self.units(
+                            STARPORTFLYING).amount) < self.townhalls.amount / 2 and (
                             self.units(STARPORT).amount + self.units(STARPORTFLYING).amount) < 2:
                         if self.can_afford(STARPORT):
                             cc = self.townhalls.random
@@ -709,11 +866,11 @@ class Trinity(sc2.BotAI):
     async def checkStarAddon(self):
         if self.StarAddedon:
             for b in self.StarAddedon:
-                if self.iteration % 10 == 0:
-                    my_techlabs = self.units(TECHLAB).tags
+                if self.iteration % 50 == 0:
+                    my_techlabs = self.units(STARPORTTECHLAB).tags
                     if await self.buildingStarAddon():
                         self.StarAddedon.remove(b)
-                    if b.add_on_tag != my_techlabs:
+                    if b.add_on_tag != my_techlabs and await self.has_ability(BUILD_TECHLAB_STARPORT, b):
                         await self.do(b(LIFT_STARPORT))
 
     async def landStar(self):
@@ -742,7 +899,7 @@ class Trinity(sc2.BotAI):
                     if not rf.add_on_tag == 0:
                         if not self.units(RAVEN).exists:
                             await self.do(rf.train(RAVEN))
-                        if self.units(MEDIVAC).amount < 8:
+                        elif self.units(MEDIVAC).amount < 8:
                             await self.do(rf.train(MEDIVAC))
 
     async def moveMedic(self):
@@ -797,9 +954,11 @@ class Trinity(sc2.BotAI):
                 for forge in self.units(ENGINEERINGBAY).ready:
                     if forge.noqueue:
                         for upgrade_level in range(1, 4):
-                            upgrade_armor_id = getattr(sc2.constants,"ENGINEERINGBAYRESEARCH_TERRANINFANTRYWEAPONSLEVEL" + str(
+                            upgrade_armor_id = getattr(sc2.constants,
+                                                       "ENGINEERINGBAYRESEARCH_TERRANINFANTRYWEAPONSLEVEL" + str(
                                                            upgrade_level))
-                            upgrade_missle_id = getattr(sc2.constants,"ENGINEERINGBAYRESEARCH_TERRANINFANTRYARMORLEVEL" + str(
+                            upgrade_missle_id = getattr(sc2.constants,
+                                                        "ENGINEERINGBAYRESEARCH_TERRANINFANTRYARMORLEVEL" + str(
                                                             upgrade_level))
                             if await self.has_ability(upgrade_missle_id, forge):
                                 if self.can_afford(upgrade_missle_id):
@@ -813,6 +972,60 @@ class Trinity(sc2.BotAI):
             if self.can_afford(ARMORY) and not self.already_pending(ARMORY):
                 cc = self.townhalls.random
                 await self.build(ARMORY, near=cc.position.towards(self.game_info.map_center, 8))
+
+    async def moveRaven(self):
+        if self.armyUnits.exists:
+            lowest_health = self.armyUnits.random
+            for unit in self.armyUnits:
+                if unit.health < lowest_health.health:
+                    lowest_health = unit
+            for medic in self.units(RAVEN).ready.idle:
+                await self.do(medic.attack(lowest_health.position))
+
+    async def chooseMedivac(self):
+        if self.units(MEDIVAC).exists:
+
+            highest_health = self.units(MEDIVAC).random
+            for unit in self.units(MEDIVAC).ready:
+                if unit.health < highest_health.health:
+                    highest_health = unit
+
+            if self.dropMedivac:
+                medivac = self.units(MEDIVAC).find_by_tag(self.dropMedivac)
+                if not medivac:
+                    self.dropMedivac = None
+
+            if not self.dropMedivac:
+                self.dropMedivac = highest_health.tag
+
+    async def assignMarines(self):
+        if self.dropMedivac:
+            medivac = self.units(MEDIVAC).find_by_tag(self.dropMedivac)
+            nearbyMarines = self.units(MARINE).ready
+            for marine in nearbyMarines:
+                print("yo")
+                if not self.dropMarines or len(self.dropMarines) < 8:
+                    print("hey")
+                    dropMarine = marine.tag
+                    self.dropMarines.append(dropMarine)
+
+    async def loadMedivac(self):
+        if self.dropMarines != None and self.dropMedivac != None:
+            print("ready")
+            medivac = self.units(MEDIVAC).find_by_tag(self.dropMedivac)
+            for marineTag in self.dropMarines:
+                print("to")
+                marine = self.units(MEDIVAC).find_by_tag(marineTag)
+                if marine:
+                    print("rumble")
+                    if await self.has_ability(LOAD_MEDIVAC, medivac):
+                        print("yes")
+                        await self.do(medivac(LOAD_MEDIVAC, marine.position))
+                else:
+                    self.dropMarines.remove(marineTag)
+
+
+
 
         ###ZERG FUNCTIONS###
 
@@ -828,7 +1041,7 @@ class Trinity(sc2.BotAI):
         if self.units(LARVA).exists:
             for larva in self.units(LARVA):
                 if self.supply_cap < 200:
-                    if self.supply_left < 7 and self.already_pending(OVERLORD) < 2:
+                    if self.supply_left < 10 and self.already_pending(OVERLORD) < 2:
                         if not self.stopArmy:
                             if self.can_afford(OVERLORD):
                                 await self.do(larva.train(OVERLORD))
@@ -844,6 +1057,9 @@ class Trinity(sc2.BotAI):
         prefered_base_count = 2 + int(math.floor(self.get_game_time() / expand_every))
         current_base_count = self.townhalls.amount
 
+        if self.nearby:
+            prefered_base_count = 0
+
         if self.minerals > 900:
             prefered_base_count += 1
 
@@ -855,7 +1071,7 @@ class Trinity(sc2.BotAI):
                 if self.can_afford(HATCHERY) and not self.already_pending(HATCHERY):
                     await self.expandNow(HATCHERY)
 
-        if current_base_count >= prefered_base_count or self.already_pending(HATCHERY):
+        if current_base_count >= prefered_base_count or self.already_pending(HATCHERY) and not self.nearby:
             self.stopWorker = False
             self.stopArmy = False
             self.stopBuild = False
@@ -871,13 +1087,14 @@ class Trinity(sc2.BotAI):
     async def buildWarren(self):
         if self.townhalls.exists:
             if not self.stopBuild:
-                if self.units(SPAWNINGPOOL).exists and not self.already_pending(ROACHWARREN) and not self.units(ROACHWARREN).exists:
+                if self.units(SPAWNINGPOOL).exists and not self.already_pending(ROACHWARREN) and not self.units(
+                        ROACHWARREN).exists:
                     hq = self.townhalls.random
                     if self.can_afford(ROACHWARREN):
                         await self.build(ROACHWARREN, near=hq.position.towards(self.game_info.map_center, 8))
 
     async def hasLair(self):
-        if(self.units(LAIR).amount > 0):
+        if (self.units(LAIR).amount > 0):
             return True
         morphingYet = False
         for h in self.units(HATCHERY):
@@ -910,17 +1127,17 @@ class Trinity(sc2.BotAI):
             hq = self.townhalls.random
             if not self.stopBuild:
                 vaspenes = self.state.vespene_geyser.closer_than(15.0, hq)
-                if self.townhalls.amount < 6:
-                    if not self.already_pending(EXTRACTOR) and (
-                            self.units(EXTRACTOR).amount / (self.townhalls.amount * self.gases)) < 1:
-                        for vaspene in vaspenes:
-                            if not self.can_afford(EXTRACTOR):
-                                break
-                            worker = self.select_build_worker(vaspene.position)
-                            if worker is None:
-                                break
-                            if not self.units(EXTRACTOR).closer_than(1.0, vaspene).exists:
-                                await self.do(worker.build(EXTRACTOR, vaspene))
+                if not self.already_pending(EXTRACTOR) and (
+                        self.units(EXTRACTOR).amount / (self.townhalls.amount * self.gases)) < 1:
+                    for vaspene in vaspenes:
+                        if not self.can_afford(EXTRACTOR):
+                            break
+                        worker = self.select_build_worker(vaspene.position)
+                        if worker is None:
+                            break
+                        if not self.units(EXTRACTOR).closer_than(1.0, vaspene).exists:
+                            await self.do(worker.build(EXTRACTOR, vaspene))
+
     async def zergArmy(self):
         if not self.stopArmy:
             if not self.units(HIVE).exists:
@@ -1174,28 +1391,24 @@ class Trinity(sc2.BotAI):
     async def buildSpire(self):
         if self.units(LAIR).exists or self.units(HIVE).exists:
             if self.get_game_time() > 550:
-                if not self.already_pending(SPIRE) and not self.units(SPIRE).exists and self.units(GREATERSPIRE).amount + self.already_pending(GREATERSPIRE) < 1:
+                if not self.already_pending(SPIRE) and not self.units(SPIRE).exists and self.units(
+                        GREATERSPIRE).amount + self.already_pending(GREATERSPIRE) < 1:
                     if self.can_afford(SPIRE):
                         hq = self.townhalls.random
                         await self.build(SPIRE, near=hq.position.towards(self.game_info.map_center, 8))
 
     async def upgradeHive(self):
         hive = None
-        if self.units(LAIR).idle.exists and not self.units(HIVE).exists and self.units(INFESTATIONPIT):
-            self.stopArmy = True
-            self.stopWorker = True
-            hive = True
+        if self.units(LAIR).idle.exists and not self.units(HIVE).exists and self.units(INFESTATIONPIT).exists:
             if self.can_afford(THOR):
                 hq = self.units(LAIR).idle.first
                 await self.do(hq.build(HIVE))
-                hive = False
-        elif hive == False:
-            self.stopArmy = False
-            self.stopWorker = False
+
 
     async def greaterSpire(self):
         if self.units(HIVE).exists and self.units(GREATERSPIRE).amount + self.already_pending(GREATERSPIRE) < 1:
-            if not self.units(GREATERSPIRE).exists and self.units(SPIRE).ready.idle.exists and self.already_pending(GREATERSPIRE) < 1:
+            if not self.units(GREATERSPIRE).exists and self.units(SPIRE).ready.idle.exists and self.already_pending(
+                    GREATERSPIRE) < 1:
                 if self.can_afford(GREATERSPIRE):
                     await self.do(self.units(SPIRE).ready.idle.random(UPGRADETOGREATERSPIRE_GREATERSPIRE))
 
@@ -1204,56 +1417,63 @@ class Trinity(sc2.BotAI):
             if self.units(HIVE).exists:
                 if self.units(LARVA).exists:
                     for larva in self.units(LARVA):
-                        if self.units(SPAWNINGPOOL).exists and self.units(ZERGLING).amount + self.already_pending(ZERGLING) < 80:
+                        if self.units(SPAWNINGPOOL).exists and self.units(ZERGLING).amount + self.already_pending(ZERGLING) < 40:
                             await self.trainZerg(ZERGLING)
-                        elif self.units(SPIRE).exists or self.units(GREATERSPIRE).exists:
+                        if self.units(SPIRE).exists or self.units(GREATERSPIRE).exists:
                             await self.trainZerg(CORRUPTOR)
 
     async def runbyGroupAdding(self):
-        for z in self.units(ZERGLING).filter(lambda z: z.tag not in self.runbyGroup).ready:
-            if len(self.runbyGroup1) < 20:
-                print("1")
-                self.runbyGroup1.add(z)
-                self.runbyGroup.add(z)
-            elif len(self.runbyGroup2) < 20:
-                print("2")
-                self.runbyGroup2.add(z)
-                self.runbyGroup.add(z)
-            elif len(self.runbyGroup3) < 20:
-                print("3")
-                self.runbyGroup3.add(z)
-                self.runbyGroup.add(z)
+        if self.units(HIVE).exists:
+            for z in self.units(ZERGLING).filter(lambda z: z.tag not in self.runbyGroup).ready:
+                if len(self.runbyGroup1) < 20 and z not in self.runbyGroup and z not in self.runbyGroup2:
+                    # print("1")
+                    self.runbyGroup1.append(z.tag)
+                    self.runbyGroup.append(z.tag)
+
+                elif len(self.runbyGroup2) < 20 and z not in self.runbyGroup and z not in self.runbyGroup1:
+                    # print("2")
+                    self.runbyGroup2.append(z.tag)
+                    self.runbyGroup.append(z.tag)
 
     async def runby(self):
-        for ac in list(self.runbyGroup1):
-            print("chicken")
-            alive_units = ac.select_units(self.units)
-            if alive_units.exists and alive_units.idle.exists:
-                print("to")
-                target = random.choice(list(self.expansion_locations.keys()))
-                for zergling in ac.select_units(self.units):
-                    print("rumble")
-                    await self.do(zergling.attack(target))
-            else:
-                self.runbyGroup1.remove(ac)
+        if self.runbyGroup1:
+            runby1Done = True
+            target = random.choice(list(self.expansion_locations.keys()))
+            for zerglingTag in self.runbyGroup1:
+                zergling = self.units(ZERGLING).find_by_tag(zerglingTag)
+                if not zergling:
+                    self.runbyGroup1.remove(zerglingTag)
+                    self.runbyGroup.remove(zerglingTag)
 
-        for ac in list(self.runbyGroup2):
-            alive_units = ac.select_units(self.units)
-            if alive_units.exists and alive_units.idle.exists:
-                target = random.choice(list(self.expansion_locations.keys()))
-                for zergling in ac.select_units(self.units):
-                    await self.do(zergling.attack(target))
-            else:
-                self.runbyGroup2.remove(ac)
+                if zergling:
+                    if not zergling.is_idle:
+                        runby1Done = False
 
-        for ac in list(self.runbyGroup3):
-            alive_units = ac.select_units(self.units)
-            if alive_units.exists and alive_units.idle.exists:
-                target = random.choice(list(self.expansion_locations.keys()))
-                for zergling in ac.select_units(self.units):
-                    await self.do(zergling.attack(target))
-            else:
-                self.runbyGroup3.remove(ac)
+            for zerglingTag in self.runbyGroup1:
+                zergling = self.units(ZERGLING).find_by_tag(zerglingTag)
+                if zergling:
+                    if runby1Done:
+                        await self.do(zergling.attack(target))
+
+
+        if self.runbyGroup2:
+            runby1Done = True
+            target = random.choice(list(self.expansion_locations.keys()))
+            for zerglingTag in self.runbyGroup2:
+                zergling = self.units(ZERGLING).find_by_tag(zerglingTag)
+                if not zergling:
+                    self.runbyGroup2.remove(zerglingTag)
+                    self.runbyGroup.remove(zerglingTag)
+
+                if zergling:
+                    if not zergling.is_idle:
+                        runby1Done = False
+
+            for zerglingTag in self.runbyGroup2:
+                zergling = self.units(ZERGLING).find_by_tag(zerglingTag)
+                if zergling:
+                    if runby1Done:
+                        await self.do(zergling.attack(target))
 
     async def spine(self):
         if not self.stopBuild:
@@ -1261,7 +1481,7 @@ class Trinity(sc2.BotAI):
                 if self.units(SPINECRAWLER).closer_than(10, hq).amount < 1:
                     if self.can_afford(SPINECRAWLER) and not self.already_pending(SPINECRAWLER):
                         await self.build(SPINECRAWLER, near=hq)
-                        
+
     async def roachSpeed(self):
         if self.units(ROACHWARREN).exists:
             rw = self.units(ROACHWARREN).first
@@ -1270,7 +1490,147 @@ class Trinity(sc2.BotAI):
                     if await self.has_ability(RESEARCH_GLIALREGENERATION, rw):
                         if self.can_afford(RESEARCH_GLIALREGENERATION):
                             await self.do(rw(RESEARCH_GLIALREGENERATION))
-                            
+
+    async def lingSpeed(self):
+        if self.units(SPAWNINGPOOL).exists:
+            rw = self.units(SPAWNINGPOOL).first
+            if rw.noqueue:
+                if await self.has_ability(RESEARCH_ZERGLINGMETABOLICBOOST, rw):
+                    if self.can_afford(RESEARCH_ZERGLINGMETABOLICBOOST):
+                        await self.do(rw(RESEARCH_ZERGLINGMETABOLICBOOST))
+
+    async def hydraRange(self):
+        if self.units(HYDRALISKDEN).exists:
+            rw = self.units(HYDRALISKDEN).first
+            if rw.noqueue:
+                if await self.has_ability(RESEARCH_GROOVEDSPINES, rw):
+                    if self.can_afford(RESEARCH_GROOVEDSPINES):
+                        await self.do(rw(RESEARCH_GROOVEDSPINES))
+
+    async def hydraSpeed(self):
+        if self.units(HYDRALISKDEN).exists:
+            rw = self.units(HYDRALISKDEN).first
+            if rw.noqueue:
+                if await self.has_ability(RESEARCH_MUSCULARAUGMENTS, rw):
+                    if self.can_afford(RESEARCH_MUSCULARAUGMENTS):
+                        await self.do(rw(RESEARCH_MUSCULARAUGMENTS))
+
+    async def burrow(self):
+        if self.townhalls.exists:
+            rw = self.townhalls.first
+            if rw.noqueue:
+                if await self.has_ability(RESEARCH_BURROW, rw):
+                    if self.can_afford(RESEARCH_BURROW):
+                        await self.do(rw(RESEARCH_BURROW))
+
+    async def burrowMicro(self):
+        for unit in self.units(ROACH).ready:
+            nearby_enemy_units = self.known_enemy_units.closer_than(10, unit)
+            if unit.health / unit.health_max < 3/10 and nearby_enemy_units.amount > 2:
+                abilities = await self.get_available_abilities(unit)
+                if AbilityId.BURROWDOWN_ROACH in abilities and self.can_afford(BURROWDOWN_ROACH):
+                    await self.do(unit(BURROWDOWN_ROACH))
+
+        for unit in self.units(ROACHBURROWED).ready:
+            nearby_enemy_units = self.known_enemy_units.closer_than(10, unit)
+            if (unit.health / unit.health_max > 6 / 10 or nearby_enemy_units.amount < 2) and unit.is_burrowed:
+                abilities = await self.get_available_abilities(unit)
+                if AbilityId.BURROWUP_ROACH in abilities and self.can_afford(BURROWUP_ROACH):
+                    await self.do(unit(BURROWUP_ROACH))
+
+        for unit in self.units(HYDRALISK).ready:
+            nearby_enemy_units = self.known_enemy_units.closer_than(10, unit)
+            if unit.health / unit.health_max < 3/10 and nearby_enemy_units.amount > 2:
+                abilities = await self.get_available_abilities(unit)
+                if AbilityId.BURROWDOWN_HYDRALISK in abilities and self.can_afford(BURROWDOWN_HYDRALISK):
+                    await self.do(unit(BURROWDOWN_HYDRALISK))
+
+        for unit in self.units(HYDRALISKBURROWED).ready:
+            nearby_enemy_units = self.known_enemy_units.closer_than(10, unit)
+            if (unit.health / unit.health_max > 6 / 10 or nearby_enemy_units.amount < 2) and unit.is_burrowed:
+                abilities = await self.get_available_abilities(unit)
+                if AbilityId.BURROWUP_HYDRALISK in abilities and self.can_afford(BURROWUP_HYDRALISK):
+                    await self.do(unit(BURROWUP_HYDRALISK))
+
+    async def moveOverseer(self):
+        if self.armyUnits.exists:
+            lowest_health = self.armyUnits.random
+            for unit in self.armyUnits:
+                if unit.health < lowest_health.health:
+                    lowest_health = unit
+            for medic in self.units(OVERSEER).ready.idle:
+                await self.do(medic.attack(lowest_health.position))
+
+    async def broodlords(self):
+        armyCount = self.units(BROODLORD).amount | self.units(CORRUPTOR).amount
+        broodlordsTotal = self.units(BROODLORD).amount + self.units(BROODLORDCOCOON).amount
+        if armyCount > 0:
+            for c in self.units(CORRUPTOR).ready:
+                if (broodlordsTotal/armyCount) < 0.4:
+                    #print("ready")
+                    if self.can_afford(BROODLORD):
+                        await self.do(c(MORPHTOBROODLORD_BROODLORD))
+
+    async def upgradesZerg(self):
+        if self.units(HIVE).exists:
+            if not self.stopBuild:
+                if self.units(EVOLUTIONCHAMBER).exists:
+                    for evochamber in self.units(EVOLUTIONCHAMBER).ready:
+                        if evochamber.noqueue:
+                    # Go through each weapon, armor and shield upgrade and check if we can research it, and if so, do it
+                            for upgrade_level in range(1, 4):
+                                upgrade_armor_id = getattr(sc2.constants, "RESEARCH_ZERGGROUNDARMORLEVEL" + str(upgrade_level))
+                                upgrade_missle_id = getattr(sc2.constants, "RESEARCH_ZERGMELEEWEAPONSLEVEL" + str(upgrade_level))
+                                if await self.has_ability(upgrade_missle_id, evochamber):
+                                    if self.can_afford(upgrade_missle_id):
+                                        await self.do(evochamber(upgrade_missle_id))
+                                elif await self.has_ability(upgrade_armor_id, evochamber):
+                                    if self.can_afford(upgrade_armor_id):
+                                        await self.do(evochamber(upgrade_armor_id))
+
+                if self.units(GREATERSPIRE).exists:
+                    evochamber = self.units(GREATERSPIRE).first
+                    # Only if we're not upgrading anything yet
+                    if evochamber.noqueue:
+                        # Go through each weapon, armor and shield upgrade and check if we can research it, and if so, do it
+                        for upgrade_level in range(1, 4):
+                            upgrade_armor_id = getattr(sc2.constants,
+                                                       "RESEARCH_ZERGFLYERATTACKLEVEL" + str(upgrade_level))
+                            upgrade_missle_id = getattr(sc2.constants,
+                                                        "RESEARCH_ZERGFLYERARMORLEVEL" + str(upgrade_level))
+                            if await self.has_ability(upgrade_missle_id, evochamber):
+                                if self.can_afford(upgrade_missle_id):
+                                    await self.do(evochamber(upgrade_missle_id))
+                            elif await self.has_ability(upgrade_armor_id, evochamber):
+                                if self.can_afford(upgrade_armor_id):
+                                    await self.do(evochamber(upgrade_armor_id))
+        else:
+            if not self.stopBuild:
+                if self.units(EVOLUTIONCHAMBER).exists:
+                    for evochamber in self.units(EVOLUTIONCHAMBER).ready:
+                        if evochamber.noqueue:
+                            # Go through each weapon, armor and shield upgrade and check if we can research it, and if so, do it
+                            for upgrade_level in range(1, 4):
+                                upgrade_armor_id = getattr(sc2.constants,
+                                                           "RESEARCH_ZERGGROUNDARMORLEVEL" + str(upgrade_level))
+                                upgrade_missle_id = getattr(sc2.constants,
+                                                            "RESEARCH_ZERGMISSILEWEAPONSLEVEL" + str(upgrade_level))
+                                if await self.has_ability(upgrade_missle_id, evochamber):
+                                    if self.can_afford(upgrade_missle_id):
+                                        await self.do(evochamber(upgrade_missle_id))
+                                elif await self.has_ability(upgrade_armor_id, evochamber):
+                                    if self.can_afford(upgrade_armor_id):
+                                        await self.do(evochamber(upgrade_armor_id))
+
+
+    async def buildEvochamber(self):
+        if self.townhalls.exists:
+            if self.units(LAIR).exists or self.units(HIVE).exists:
+                if self.can_afford(EVOLUTIONCHAMBER) and self.already_pending(EVOLUTIONCHAMBER) < 2 and self.units(
+                        EVOLUTIONCHAMBER).amount < 2:
+                    hq = self.townhalls.random
+                    await self.build(EVOLUTIONCHAMBER, near=hq.position.towards(self.game_info.map_center, 8))
+
     ###USE FUNCTIONS###
     def get_rally_location(self):
         if self.townhalls.exists:
@@ -1279,7 +1639,7 @@ class Trinity(sc2.BotAI):
             return rally_location
 
     def get_game_time(self):
-        return self.state.game_loop*0.725*(1/16)
+        return self.state.game_loop * 0.725 * (1 / 16)
 
     async def expandNow(self, townhall, building=None, max_distance=10, location=None):
         """Takes new expansion."""
@@ -1332,7 +1692,7 @@ class Trinity(sc2.BotAI):
 
     async def execute_order_queue(self):
         await self._client.actions(self.order_queue, game_data=self._game_data)
-        self.order_queue = [] # Reset order queue
+        self.order_queue = []  # Reset order queue
 
     async def do(self, action):
 
@@ -1353,14 +1713,105 @@ class Trinity(sc2.BotAI):
             for distance in range(minRange, maxRange + 1)]  # distance depending on minrange and maxrange
         return positions
 
+    def has_order(self, orders, units):
+        if type(orders) != list:
+            orders = [orders]
 
-run_game(maps.get("(2)CatalystLE"), [
-    #Human(Race.Zerg),
-    #Bot(Race.Terran, Trinity()),
-    Bot(Race.Zerg, Trinity()),
-    #Bot(Race.Protoss, Trinity()),
-    #Bot(Race.Random, Trinity()),
-    #Computer(Race.Random, Difficulty.VeryHard),
-    #Computer(Race.Random, Difficulty.VeryHard),
-    Computer(Race.Random, Difficulty.VeryHard)
-], realtime=True)
+        count = 0
+
+        if type(units) == sc2.unit.Unit:
+            unit = units
+            if len(unit.orders) >= 1 and unit.orders[0].ability.id in orders:
+                count += 1
+        else:
+            for unit in units:
+                if len(unit.orders) >= 1 and unit.orders[0].ability.id in orders:
+                  count += 1
+
+        return count
+
+    async def order(self, units, order, target=None, silent=True):
+        if type(units) != list:
+            unit = units
+            await self.do(unit(order, target=target))
+        else:
+            for unit in units:
+                await self.do(unit(order, target=target))
+
+    async def distributeWorkers(self):
+        """
+        Distributes workers across all the bases taken.
+        WARNING: This is quite slow when there are lots of workers or multiple bases.
+        """
+
+        # TODO:
+        # OPTIMIZE: Assign idle workers smarter
+        # OPTIMIZE: Never use same worker mutltiple times
+
+        expansion_locations = self.expansion_locations
+        owned_expansions = self.owned_expansions
+        worker_pool = []
+        for idle_worker in self.workers.idle:
+            if idle_worker.tag != self.scouter:
+                mf = self.state.mineral_field.closest_to(idle_worker)
+                await self.do(idle_worker.gather(mf))
+
+        for location, townhall in owned_expansions.items():
+            workers = self.workers.closer_than(20, location)
+            actual = townhall.assigned_harvesters
+            ideal = townhall.ideal_harvesters
+            excess = actual - ideal
+            if actual > ideal:
+                worker_pool.extend(workers.random_group_of(min(excess, len(workers))))
+                continue
+        for g in self.geysers:
+            workers = self.workers.closer_than(5, g)
+            actual = g.assigned_harvesters
+            ideal = g.ideal_harvesters
+            excess = actual - ideal
+            if actual > ideal:
+                worker_pool.extend(workers.random_group_of(min(excess, len(workers))))
+                continue
+
+        for g in self.geysers:
+            actual = g.assigned_harvesters
+            ideal = g.ideal_harvesters
+            deficit = ideal - actual
+
+            for x in range(0, deficit):
+                if worker_pool:
+                    w = worker_pool.pop()
+                    if w.tag != self.scouter:
+                        if len(w.orders) == 1 and w.orders[0].ability.id in [AbilityId.HARVEST_RETURN]:
+                            await self.do(w.move(g))
+                            await self.do(w.return_resource(queue=True))
+                        else:
+                            await self.do(w.gather(g))
+
+        for location, townhall in owned_expansions.items():
+            actual = townhall.assigned_harvesters
+            ideal = townhall.ideal_harvesters
+
+            deficit = ideal - actual
+            for x in range(0, deficit):
+                if worker_pool:
+                    w = worker_pool.pop()
+                    mf = self.state.mineral_field.closest_to(townhall)
+                    if w.tag != self.scouter:
+                        if len(w.orders) == 1 and w.orders[0].ability.id in [AbilityId.HARVEST_RETURN]:
+                            await self.do(w.move(townhall))
+                            await self.do(w.return_resource(queue=True))
+                            await self.do(w.gather(mf, queue=True))
+                        else:
+                            await self.do(w.gather(mf))
+
+# for i in range(10):
+#     run_game(maps.get("CeruleanFallLE"), [
+#         # Human(Race.Zerg),
+#         # Bot(Race.Terran, Trinity()),
+#         # Bot(Race.Zerg, Trinity()),
+#         # Bot(Race.Protoss, Trinity()),
+#         Bot(Race.Random, Trinity()),
+#         Computer(Race.Random, Difficulty.VeryHard)
+#     ], realtime=False)
+
