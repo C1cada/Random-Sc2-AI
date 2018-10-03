@@ -112,6 +112,7 @@ class Trinity(sc2.BotAI):
             await self.buildArmory()
             await self.moveRaven()
             await self.rushTerran()
+            await self.turret()
             # await self.chooseMedivac()
             # await self.assignMarines()
             # await self.loadMedivac()
@@ -154,8 +155,6 @@ class Trinity(sc2.BotAI):
             await self.rushZerg()
 
 
-
-
         ###PROTOSS INTSRUCTIONS###
         elif self.myRace == "Protoss":
             await self.buildPylons()
@@ -183,6 +182,7 @@ class Trinity(sc2.BotAI):
             await self.buildCarrier()
             await self.moveObserver()
             await self.rushProtoss()
+            await self.cannon()
 
         await self.execute_order_queue()
 
@@ -306,7 +306,7 @@ class Trinity(sc2.BotAI):
     #         self.stop_worker = False
 
     async def nearbyUnits(self):
-        if self.get_game_time() > 240:
+        if self.get_game_time() > 300:
             enemiesCloseToTh = None
             for th in self.townhalls.ready:
                 enemiesCloseToTh = self.known_enemy_units.closer_than(15, th.position)
@@ -317,7 +317,7 @@ class Trinity(sc2.BotAI):
                 self.stopArmy = False
             if enemiesCloseToTh:
                 if enemiesCloseToTh.amount > 3:
-                    print("yay")
+                    # print("yay")
                     self.stopWorker = True
                     self.nearby = True
                     self.stopBuild = True
@@ -325,14 +325,15 @@ class Trinity(sc2.BotAI):
 
 
     async def checkRush(self):
-        if self.get_game_time() < 240:
+        if self.get_game_time() < 300:
             for th in self.townhalls:
-                if self.known_enemy_structures(PYLON).closer_than(45, th.position).exists or self.known_enemy_units.not_structure.filter(lambda unit: unit.type_id not in self.units_to_ignore).amount > 5 or self.known_enemy_structures(BARRACKS).closer_than(15, th.position).exists or self.known_enemy_structures(HATCHERY).closer_than(45, th.position).exists:
-                    print("rush")
+                if self.known_enemy_structures(PYLON).closer_than(45, th.position).exists or sum([unit._type_data._proto.food_required for unit in self.known_enemy_units.not_structure.filter(lambda unit: unit.type_id not in self.units_to_ignore)]) >= 4 or self.known_enemy_structures(BARRACKS).closer_than(45, th.position).exists or self.known_enemy_structures(HATCHERY).closer_than(45, th.position).exists:
+                    # print("rush")
                     self.rush = True
 
     async def armyScout(self):
-        if (self.get_game_time() == 120 or self.get_game_time() == 240 or self.get_game_time() == 460 or self.get_game_time() == 680 or self.get_game_time() == 900):
+        # if self.get_game_time() % 120 == 0:
+        if self.state.game_loop % 2688 % 120 == 0:
             # print("Scouting")
             if self.myRace == "Terran":
                 if self.units(MARINE).exists:
@@ -379,10 +380,11 @@ class Trinity(sc2.BotAI):
                     await self.build(GATEWAY, near=pylon.position.towards(self.game_info.map_center))
 
     async def buildCyber(self):
-        if self.units(PYLON).exists and self.units(GATEWAY).exists and self.can_afford(CYBERNETICSCORE):
-            if not self.units(CYBERNETICSCORE).exists and not self.already_pending(CYBERNETICSCORE):
-                pylon = self.units(PYLON).random
-                await self.build(CYBERNETICSCORE, near=pylon)
+        if not self.stopBuild:
+            if self.units(PYLON).exists and self.units(GATEWAY).exists and self.can_afford(CYBERNETICSCORE):
+                if not self.units(CYBERNETICSCORE).exists and not self.already_pending(CYBERNETICSCORE):
+                    pylon = self.units(PYLON).random
+                    await self.build(CYBERNETICSCORE, near=pylon)
 
     async def buildAssimilator(self):
         if self.townhalls.exists:
@@ -528,18 +530,20 @@ class Trinity(sc2.BotAI):
             return error
 
     async def buildRobo(self):
-        if self.units(CYBERNETICSCORE).ready.exists and self.units(
-                ROBOTICSFACILITY).amount < 0.5 * self.townhalls.amount and self.units(ROBOTICSFACILITY).amount < 2:
-            pylon = self.units(PYLON).ready.random
-            if self.can_afford(ROBOTICSFACILITY) and not self.already_pending(ROBOTICSFACILITY):
-                await self.build(ROBOTICSFACILITY, near=pylon)
+        if not self.stopBuild:
+            if self.units(CYBERNETICSCORE).ready.exists and self.units(
+                    ROBOTICSFACILITY).amount < 0.5 * self.townhalls.amount and self.units(ROBOTICSFACILITY).amount < 2:
+                pylon = self.units(PYLON).ready.random
+                if self.can_afford(ROBOTICSFACILITY) and not self.already_pending(ROBOTICSFACILITY):
+                    await self.build(ROBOTICSFACILITY, near=pylon)
 
     async def buildTwilight(self):
-        if self.units(CYBERNETICSCORE):
-            if not self.units(TWILIGHTCOUNCIL).exists:
-                if self.can_afford(TWILIGHTCOUNCIL) and not self.already_pending(TWILIGHTCOUNCIL):
-                    pylon = self.units(PYLON).ready.random
-                    await self.build(TWILIGHTCOUNCIL, near=pylon)
+        if not self.stopBuild:
+            if self.units(CYBERNETICSCORE):
+                if not self.units(TWILIGHTCOUNCIL).exists:
+                    if self.can_afford(TWILIGHTCOUNCIL) and not self.already_pending(TWILIGHTCOUNCIL):
+                        pylon = self.units(PYLON).ready.random
+                        await self.build(TWILIGHTCOUNCIL, near=pylon)
 
     async def charge(self):
         if self.units(TWILIGHTCOUNCIL).exists:
@@ -623,11 +627,12 @@ class Trinity(sc2.BotAI):
                     await self.do(prism(LOAD_WARPPRISM, target))
 
     async def buildForge(self):
-        if self.units(PYLON).exists:
-            if self.units(FORGE).amount < 1:
-                if self.can_afford(FORGE) and not self.already_pending(FORGE):
-                    pylon = self.units(PYLON).ready.random
-                    await self.build(FORGE, near=pylon)
+        if not self.stopBuild:
+            if self.units(PYLON).exists:
+                if self.units(FORGE).amount < 1:
+                    if self.can_afford(FORGE) and not self.already_pending(FORGE):
+                        pylon = self.units(PYLON).ready.random
+                        await self.build(FORGE, near=pylon)
 
     async def upgrades(self):
         if not self.stopBuild:
@@ -661,18 +666,20 @@ class Trinity(sc2.BotAI):
 
 
     async def stargate(self):
-        if self.get_game_time() > 800:
-            if self.units(STARGATE).amount < 6 and self.units(STARGATE).amount <= self.townhalls.amount:
-                if self.can_afford(STARGATE):
-                    pylon = self.units(PYLON).ready.random
-                    await self.build(STARGATE, near=pylon)
+        if not self.stopBuild:
+            if self.get_game_time() > 800:
+                if self.units(STARGATE).amount < 6 and self.units(STARGATE).amount <= self.townhalls.amount:
+                    if self.can_afford(STARGATE):
+                        pylon = self.units(PYLON).ready.random
+                        await self.build(STARGATE, near=pylon)
 
     async def fleetBeacon(self):
-        if self.units(STARGATE).exists:
-            if self.can_afford(FLEETBEACON) and not self.already_pending(FLEETBEACON):
-                if not self.units(FLEETBEACON).exists:
-                    pylon = self.units(PYLON).ready.random
-                    await self.build(FLEETBEACON, near=pylon)
+        if not self.stopBuild:
+            if self.units(STARGATE).exists:
+                if self.can_afford(FLEETBEACON) and not self.already_pending(FLEETBEACON):
+                    if not self.units(FLEETBEACON).exists:
+                        pylon = self.units(PYLON).ready.random
+                        await self.build(FLEETBEACON, near=pylon)
 
     async def buildCarrier(self):
         if self.units(FLEETBEACON).exists and self.units(STARGATE).exists:
@@ -708,6 +715,16 @@ class Trinity(sc2.BotAI):
             if self.can_afford(PHOTONCANNON):
                 pylon = self.units(PYLON).ready.random
                 await self.build(PHOTONCANNON, near=pylon)
+
+    async def cannon(self):
+        if not self.stopBuild:
+            for hq in self.townhalls.ready:
+                if self.units(FORGE).exists:
+                    if self.units(PHOTONCANNON).closer_than(10, hq).amount < 1:
+                        if self.can_afford(PHOTONCANNON) and not self.already_pending(PHOTONCANNON):
+                            await self.build(PHOTONCANNON, near=hq)
+
+
         ###TERRAN FUNCTIONS###
 
     async def buildSCVs(self):
@@ -1104,7 +1121,13 @@ class Trinity(sc2.BotAI):
                 while not self.units(BARRACKS).exists:
                     await self.buildBarracks()
 
-
+    async def turret(self):
+        if not self.stopBuild:
+            for hq in self.townhalls.ready:
+                if self.units(ENGINEERINGBAY).exists:
+                    if self.units(MISSLETURRET).closer_than(10, hq).amount < 1:
+                        if self.can_afford(MISSLETURRET) and not self.already_pending(MISSLETURRET):
+                            await self.build(MISSLETURRET, near=hq)
 
         ###ZERG FUNCTIONS###
 
@@ -1564,9 +1587,10 @@ class Trinity(sc2.BotAI):
     async def spine(self):
         if not self.stopBuild:
             for hq in self.townhalls.ready:
-                if self.units(SPINECRAWLER).closer_than(10, hq).amount < 1:
-                    if self.can_afford(SPINECRAWLER) and not self.already_pending(SPINECRAWLER):
-                        await self.build(SPINECRAWLER, near=hq)
+                if self.units(SPAWNINGPOOL).exists:
+                    if self.units(SPINECRAWLER).closer_than(10, hq).amount < 1:
+                        if self.can_afford(SPINECRAWLER) and not self.already_pending(SPINECRAWLER):
+                            await self.build(SPINECRAWLER, near=hq)
 
     async def roachSpeed(self):
         if self.units(ROACHWARREN).exists:
@@ -1913,11 +1937,11 @@ class Trinity(sc2.BotAI):
                             await self.do(w.gather(mf))
 
 # for i in range(10):
-#     run_game(maps.get("CeruleanFallLE"), [
-#         # Human(Race.Zerg),
-#         # Bot(Race.Terran, Trinity()),
-#         # Bot(Race.Zerg, Trinity()),
-#         # Bot(Race.Protoss, Trinity()),
-#         Bot(Race.Random, Trinity()),
-#         Computer(Race.Zerg, Difficulty.VeryHard)
-#     ], realtime=True)
+run_game(maps.get("AcidPlantLE"), [
+    # Human(Race.Zerg),
+    # Bot(Race.Terran, Trinity()),
+    # Bot(Race.Zerg, Trinity()),
+    # Bot(Race.Protoss, Trinity()),
+    Bot(Race.Random, Trinity()),
+    Computer(Race.Random, Difficulty.VeryHard)
+], realtime=True)
