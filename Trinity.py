@@ -617,7 +617,7 @@ class Trinity(sc2.BotAI):
                     break
             for prism in self.units(WARPPRISM).idle:
                 for passenger in prism.passengers:
-                    if passenger.shield > 30
+                    if passenger.shield > 30:
                         if await self.has_ability(UNLOADALLAT_WARPPRISM, prism):
                             await self.do(prism(UNLOADALLAT_WARPPRISM, prism.position))
                 if target:
@@ -643,7 +643,7 @@ class Trinity(sc2.BotAI):
 
         for prism in self.units(WARPPRISMPHASING):
             for passenger in prism.passengers:
-                if passenger.shield > 30
+                if passenger.shield > 30:
                     if await self.has_ability(UNLOADALLAT_WARPPRISM, prism):
                         await self.do(prism(UNLOADALLAT_WARPPRISM, prism.position))
 
