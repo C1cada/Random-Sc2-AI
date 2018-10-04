@@ -1123,14 +1123,14 @@ class Trinity(sc2.BotAI):
                         print("yes")
                         await self.do(medivac(LOAD_MEDIVAC, marine.position))
                 else:
-                    if not marine.tag in medivac.passengers.tags
+                    if not marine.tag in medivac.passengers_tags
                         self.dropMarines.remove(marineTag)
                     
     async def moveDrop(self):
         enemyBase = self.known_enemy_structures.filter(lambda unit: unit.type_id in self.hqs).random
         target = enemyBase.position.towards(self.game_info.map_center, random.randrange(-10,-1)))
         medivac = self.units(MEDIVAC).find_by_tag(self.dropMedivac)
-            if medivac.passangers.amount > 7:
+            if medivac.cargo_used > 7:
                 if await self.has_ability(UNLOADALLAT_MEDIVAC, medivac):
                     await self.do(medivac(UNLOADALLAT_MEDIVAC, target))
         
