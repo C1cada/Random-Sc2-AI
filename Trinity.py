@@ -1110,12 +1110,12 @@ class Trinity(sc2.BotAI):
                     self.dropMarines.append(dropMarine)
 
     async def loadMedivac(self):
-        if self.dropMarines != None and self.dropMedivac != None:
+        if self.dropMarines and self.dropMedivac:
             print("ready")
             medivac = self.units(MEDIVAC).find_by_tag(self.dropMedivac)
             for marineTag in self.dropMarines:
                 print("to")
-                marine = self.units(MEDIVAC).find_by_tag(marineTag)
+                marine = self.units(MARINE).find_by_tag(marineTag)
                 if marine:
                     print("rumble")
                     if await self.has_ability(LOAD_MEDIVAC, medivac):
